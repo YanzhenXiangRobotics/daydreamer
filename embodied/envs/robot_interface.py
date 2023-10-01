@@ -588,6 +588,7 @@ class PickPlace(BaseEnv):  # GraspRewardEnv
             if self.is_hover():
                 return (
                     np.array(self._arm.RIGHT_SAFE_XY_MIN),
+                    
                     np.array(self._arm.RIGHT_SAFE_XY_MAX),
                     self._arm.Z_HOVER,
                 )

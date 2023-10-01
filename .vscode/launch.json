@@ -1,0 +1,41 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            // "args": ["--configs",
+            //         "xarm",
+            //         "--run",
+            //         "learning",
+            //         "--task",
+            //         "xarm_dummy",
+            //         "--tf.platform",
+            //         "cpu",
+            //         "--logdir",
+            //         "~/logdir/run1"]
+            "args": ["--configs",
+                    "xarm",
+                    "--run",
+                    "acting",
+                    "--task",
+                    // "xarm_real",
+                    "xarm_dummy",
+                    "--env.kbreset",
+                    "True",
+                    "--tf.platform",
+                    "cpu",
+                    "--tf.jit",
+                    "False",
+                    "--logdir",
+                    "~/logdir/run1"] 
+        }
+    ]
+}
