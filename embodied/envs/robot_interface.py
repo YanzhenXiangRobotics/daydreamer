@@ -674,67 +674,70 @@ class PickPlace(BaseEnv):  # GraspRewardEnv
             target_pose[1] = cart_pos[1]
         return target_pose
 
+    # def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
+    #     if action["reset"]:
+    #         if action.get("manual_resume", False):
+    #             return self.get_obs(robot_in_safe_state=True, is_first=True)
+    #         else:
+    #             return self._reset()
+
+
+    #     if action["action"] < 4:
+    #         pos_delta = ((-1, 0), (1, 0), (0, -1), (0, 1))[action["action"]]
+    #         xyzrpy = self.compute_arm_position(np.array(pos_delta))
+    #         self._arm.set_position(xyzrpy[0], xyzrpy[1])
+
+    #     elif action["action"] == 4:  # close
+    #         if self._arm._gripper_state_open:
+    #             self._arm.close_gripper()
+    #         else:
+    #             self._arm.open_gripper()
+
+    #     elif action["action"] == 5:  # close
+    #         arm_side: Side = self.arm_side()
+    #         _, _, cart_pos = self._arm.get_robot_state()
+    #         is_hover = cart_pos[2] > (self._arm.Z_HOVER + self._arm.Z_TABLE) / 2
+    #         if is_hover:
+    #             self._arm.set_z(self._arm.Z_TABLE)
+    #         elif self.grasped_object:
+    #             _, _, cart_pos = self._arm.get_robot_state()
+    #             if arm_side == Side.LEFT:
+    #                 cart_pos[:2] = np.clip(
+    #                     cart_pos[:2],
+    #                     self._arm.LEFT_SAFE_XY_MIN,
+    #                     self._arm.LEFT_SAFE_XY_MAX,
+    #                 )
+    #             else:
+    #                 cart_pos[:2] = np.clip(
+    #                     cart_pos[:2],
+    #                     self._arm.RIGHT_SAFE_XY_MIN,
+    #                     self._arm.RIGHT_SAFE_XY_MAX,
+    #                 )
+    #             if self.cfg.enable_z:
+    #                 self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_TABLE)
+    #                 self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_HOVER)
+    #         else:
+    #             # no object so no op
+    #             pass
+    #     else:
+    #         raise NotImplementedError(action)
+
+    #     self.rate.sleep()
+
+    #     obs = self.get_obs(
+    #         robot_in_safe_state=True, is_first=False
+    #     )  # TODO: check safe state
+    #     if obs["reward"] != 0:
+    #         obs = self.get_obs(
+    #             robot_in_safe_state=True, is_first=False, reward=obs["reward"]
+    #         )
+
+    #     if action.get("manual_pause", False):
+    #         self._arm.open_gripper()
+    #     return obs
+
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
-        if action["reset"]:
-            if action.get("manual_resume", False):
-                return self.get_obs(robot_in_safe_state=True, is_first=True)
-            else:
-                return self._reset()
-
-
-        if action["action"] < 4:
-            pos_delta = ((-1, 0), (1, 0), (0, -1), (0, 1))[action["action"]]
-            xyzrpy = self.compute_arm_position(np.array(pos_delta))
-            self._arm.set_position(xyzrpy[0], xyzrpy[1])
-
-        elif action["action"] == 4:  # close
-            if self._arm._gripper_state_open:
-                self._arm.close_gripper()
-            else:
-                self._arm.open_gripper()
-
-        elif action["action"] == 5:  # close
-            arm_side: Side = self.arm_side()
-            _, _, cart_pos = self._arm.get_robot_state()
-            is_hover = cart_pos[2] > (self._arm.Z_HOVER + self._arm.Z_TABLE) / 2
-            if is_hover:
-                self._arm.set_z(self._arm.Z_TABLE)
-            elif self.grasped_object:
-                _, _, cart_pos = self._arm.get_robot_state()
-                if arm_side == Side.LEFT:
-                    cart_pos[:2] = np.clip(
-                        cart_pos[:2],
-                        self._arm.LEFT_SAFE_XY_MIN,
-                        self._arm.LEFT_SAFE_XY_MAX,
-                    )
-                else:
-                    cart_pos[:2] = np.clip(
-                        cart_pos[:2],
-                        self._arm.RIGHT_SAFE_XY_MIN,
-                        self._arm.RIGHT_SAFE_XY_MAX,
-                    )
-                if self.cfg.enable_z:
-                    self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_TABLE)
-                    self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_HOVER)
-            else:
-                # no object so no op
-                pass
-        else:
-            raise NotImplementedError(action)
-
-        self.rate.sleep()
-
-        obs = self.get_obs(
-            robot_in_safe_state=True, is_first=False
-        )  # TODO: check safe state
-        if obs["reward"] != 0:
-            obs = self.get_obs(
-                robot_in_safe_state=True, is_first=False, reward=obs["reward"]
-            )
-
-        if action.get("manual_pause", False):
-            self._arm.open_gripper()
-        return obs
+        pass
 
     def _reset(self) -> Dict[str, Any]:
         self.grasped_object = False

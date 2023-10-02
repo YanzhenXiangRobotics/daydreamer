@@ -18,6 +18,8 @@ __package__ = directory.name
 
 import embodied
 
+import gym
+import panda_gym
 
 def main(argv=None):
   from . import agent as agnt
@@ -57,9 +59,10 @@ def main(argv=None):
   cleanup = []
   try:
     config = config.update({'env.seed': hash((config.seed, parsed.worker))})
-    env = embodied.envs.load_env(
-        config.task, mode='train', logdir=logdir, **config.env)
-    agent = agnt.Agent(env.obs_space, env.act_space, step, config)
+    # env = embodied.envs.load_env(
+    #     config.task, mode='train', logdir=logdir, **config.env)
+    env = gym.make('PandaReach-v3', render_mode="human")
+    agent = agnt.Agent(env.observa, env.act_space, step, config)
     cleanup.append(env)
 
     if config.run == 'train':
