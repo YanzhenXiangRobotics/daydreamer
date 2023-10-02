@@ -65,7 +65,8 @@ class Workspace:
         self.replay_storage = ReplayBufferStorage(data_specs,
                                                   self.work_dir / 'buffer')
 
-        self.replay_loader = make_replay_loader(
+        self.replay_loader = make_replay_loader(data_specs,
+        # self.replay_loader = make_replay_loader(self.replay_storage,
             self.work_dir / 'buffer', self.cfg.replay_buffer_size,
             self.cfg.batch_size, self.cfg.replay_buffer_num_workers,
             self.cfg.save_snapshot, self.cfg.nstep, self.cfg.discount)
