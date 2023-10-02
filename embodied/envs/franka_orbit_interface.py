@@ -174,7 +174,8 @@ class XArmSimpleRobotWrapper:
     def __init__(self):
         from xarm.wrapper import XArmAPI
 
-        self.robot = XArmAPI("192.168.1.233")
+        # self.robot = XArmAPI("192.168.1.233")
+        self.robot = XArmAPI("127.0.0.1")
 
         self._set_gripper_position(self.GRIPPER_OPEN)
         self._gripper_state_open = True  # open

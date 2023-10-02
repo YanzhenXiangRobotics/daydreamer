@@ -180,8 +180,9 @@ class XArmSimpleRobotWrapper:
     def __init__(self):
         from xarm.wrapper import XArmAPI
 
-        self.robot = XArmAPI("192.168.1.233")
-
+        # self.robot = XArmAPI("192.168.1.233")
+        self.robot = XArmAPI(do_not_open=True)
+        # self.robot = XArmAPI("127.0.0.1")
         self._set_gripper_position(self.GRIPPER_OPEN)
         self._gripper_state_open = True  # open
 
@@ -736,6 +737,7 @@ class PickPlace(BaseEnv):  # GraspRewardEnv
         return obs
 
     def _reset(self) -> Dict[str, Any]:
+        self.grasped_object = False
         if self.grasped_object:
             # move to random pos in bin where object was grasped
             x, y = self.random_xy_grid(self._ball_side)
