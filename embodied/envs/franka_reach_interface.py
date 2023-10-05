@@ -1,6 +1,33 @@
+import argparse
+import os
+
+from omni.isaac.kit import SimulationApp
+
+# add argparse arguments
+parser = argparse.ArgumentParser("Welcome to Orbit: Omniverse Robotics Environments!")
+parser.add_argument("--headless", action="store_true", default=False, help="Force display off at all times.")
+parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
+parser.add_argument("--video_interval", type=int, default=2000, help="Interval between video recordings (in steps).")
+parser.add_argument("--cpu", action="store_true", default=False, help="Use CPU pipeline.")
+parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+# parser.add_argument("--task", type=str, default=None, help="Name of the task.")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+args_cli = parser.parse_args()
+
+config = {"headless": args_cli.headless}
+# load cheaper kit config in headless
+if args_cli.headless:
+    app_experience = f"{os.environ['EXP_PATH']}/omni.isaac.sim.python.gym.headless.kit"
+else:
+    app_experience = f"{os.environ['EXP_PATH']}/omni.isaac.sim.python.kit"
+# launch the simulator
+simulation_app = SimulationApp(config, experience=app_experience)
+
+"""Rest everything follows."""
+
 import dataclasses
 import enum
-import socket
 import sys
 import time
 import traceback
@@ -14,100 +41,21 @@ import pyrealsense2 as rs
 import embodied
 from embodied.envs.spacemouse import SpaceMouse
 
-
-class RobotType(enum.Enum):
-    XARM = 1
-    UR5 = 2
-
-    def joints(self) -> int:
-        if self == RobotType.UR5:
-            return 6
-        elif self == RobotType.XARM:
-            return 7
-        else:
-            raise NotImplementedError(f"RobotType: {self}")
-
-
-class Task(enum.Enum):
-    PICKPLACE = 1
-    SWEEP = 2
-
+from omni.isaac.orbit_envs.utils import parse_env_cfg
+from omni.isaac.orbit_envs.manipulation.reach.reach_env import ReachEnv, ReachEnvCfg
+import torch
 
 class FrankaRobotSimWrapper:
 
-    # x <--|
-    #      |
-    #      v
-    #      y
-
-    VEL = 8.0
-    VEL_Z = 1.0
-    ACC = 2.0
-    GRIPPER_OPEN = 5
-    GRIPPER_CLOSE = 230
-
-    Y_ADJ = 0.08
-    X_ADJ = 0.04
-
-    LEFT_XY_MIN = (-0.125, -0.64)
-    LEFT_XY_MAX = (0.048, -0.36)
-    LEFT_SAFE_XY_MIN = (LEFT_XY_MIN[0] + X_ADJ + 0.06, LEFT_XY_MIN[1] + Y_ADJ)
-    LEFT_SAFE_XY_MAX = (LEFT_XY_MAX[0] - X_ADJ, LEFT_XY_MAX[1] - Y_ADJ)
-
-    RIGHT_XY_MIN = (-0.455, -0.64)
-    RIGHT_XY_MAX = (-0.285, -0.36)
-    RIGHT_SAFE_XY_MIN = (RIGHT_XY_MIN[0] + X_ADJ, RIGHT_XY_MIN[1] + Y_ADJ)
-    RIGHT_SAFE_XY_MAX = (RIGHT_XY_MAX[1] - X_ADJ, RIGHT_XY_MAX[1] - Y_ADJ)
-
-    Z_TABLE = -0.010
-    Z_HOVER = 0.12
-    Z_RESET = 0.18
-    AXIS = 0
-
     def __init__(self):
-
-        self.robot = urx.SingleArmManipulatorCfg
-        self.robotiqgrip = Robotiq_Two_Finger_Gripper(self.robot, force=0)
-
-        self._set_gripper_position(self.GRIPPER_OPEN)
-        self._gripper_state_open = True  # open
-
-    def get_gripper_pos(self) -> float:
-        self.gripper_read_socket.sendall(b"GET POS\n")
-        data = self.gripper_read_socket.recv(2 ** 10)
-        gripper_pos = int(data[4:-1])
-        assert 0 <= gripper_pos <= 255
-
-        normalized_gripper_pos = (gripper_pos - self.GRIPPER_OPEN) / (
-            self.GRIPPER_CLOSE - self.GRIPPER_OPEN
-        )
-        return normalized_gripper_pos
-
-    def _set_gripper_position(self, pos: int) -> None:
-        assert 0 <= pos <= 255
-        self.robotiqgrip.gripper_action(pos)
-
-    def close_gripper(self) -> None:
-        if self._gripper_state_open:
-            self._set_gripper_position(self.GRIPPER_CLOSE)
-        self._gripper_state_open = False
-
-    def open_gripper(self) -> None:
-        if not self._gripper_state_open:
-            self._set_gripper_position(self.GRIPPER_OPEN)
-        self._gripper_state_open = True
-
-    def __del__(self):
-        self.robot.close()
-        self.gripper_read_socket.close()
+        env_cfg = parse_env_cfg(task_name="Isaac-Reach-Franka-v0", use_gpu=not args_cli.cpu, num_envs=args_cli.num_envs)
+        self.env = ReachEnv(cfg=env_cfg)
 
     def get_robot_state(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
-        gripper_pos = self.get_gripper_pos()
-        servo_angle = self.robot.getj()
-        cart_pos = self.robot.getl()
+        servo_angle = self.env._observation_manager.arm_dof_pos_normalized()
+        cart_pos = self.env._observation_manager.ee_position()
         return (
-            np.array([gripper_pos], np.float32),
             np.array(servo_angle, np.float32),
             np.array(cart_pos, np.float32),
         )
@@ -121,154 +69,15 @@ class FrankaRobotSimWrapper:
         acc: Optional[float] = None,
     ) -> None:
         if z is None:
-            z = self.robot.get_pos().z
+            z = self.env._observation_manager.ee_position()[-1]
         assert z is not None
 
-        if acc is None:
-            acc = self.ACC
-
-        self.robot.movel(
-            (x, y, z, -2.2213, -2.2213, 0),
-            acc=acc,
-            vel=self.VEL,
-            threshold=0.01,
-            wait=wait,
-        )
+        self.env._step_impl(actions=torch.tensor((x, y, z, -2.2213, -2.2213, 0)))
 
     def set_z(self, z: float, wait: bool = True) -> None:
-        p = self.robot.get_pos()
-        p.z = z
-        self.robot.set_pos(p, acc=self.ACC, vel=self.VEL_Z, threshold=0.01, wait=wait)
-
-
-class XArmSimpleRobotWrapper:
-    VEL = 800
-    VEL_Z = 80
-    GRIPPER_OPEN = 800
-    GRIPPER_CLOSE = 0
-
-    # BBOX CONSTANTS
-    #      x
-    #      ^
-    #      |
-    # y <--|
-    X_ADJ = 0.08
-    Y_ADJ = 0.04
-
-    LEFT_XY_MIN = (0.252, 0.085)
-    LEFT_XY_MAX = (0.523, 0.175)
-    LEFT_SAFE_XY_MIN = (0.252 + X_ADJ, 0.085 + Y_ADJ)
-    LEFT_SAFE_XY_MAX = (0.523 - X_ADJ, 0.175 - Y_ADJ)
-
-    RIGHT_XY_MIN = (0.252, -0.170)
-    RIGHT_XY_MAX = (0.523, -0.075)
-    RIGHT_SAFE_XY_MIN = (0.252 + X_ADJ, -0.170 + Y_ADJ)
-    RIGHT_SAFE_XY_MAX = (0.523 - X_ADJ, -0.075 - Y_ADJ - 0.035)
-
-    Z_TABLE = 0.182
-    Z_HOVER = 0.290
-    Z_RESET = 0.450
-
-    AXIS = 1
-
-    def __init__(self):
-        from xarm.wrapper import XArmAPI
-
-        # self.robot = XArmAPI("192.168.1.233")
-        self.robot = XArmAPI("127.0.0.1")
-
-        self._set_gripper_position(self.GRIPPER_OPEN)
-        self._gripper_state_open = True  # open
-
-    def get_gripper_pos(self) -> float:
-        code, gripper_pos = self.robot.get_gripper_position()
-        while code != 0 or gripper_pos is None:
-            print(f"Error code {code} in get_gripper_position(). {gripper_pos}")
-            self.clear_error_states()
-            code, gripper_pos = self.robot.get_gripper_position()
-
-        normalized_gripper_pos = (gripper_pos - self.GRIPPER_OPEN) / (
-            self.GRIPPER_CLOSE - self.GRIPPER_OPEN
-        )
-        return normalized_gripper_pos
-
-    def _set_gripper_position(self, pos: int) -> None:
-        self.robot.set_gripper_position(pos, wait=True)
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
-
-    def close_gripper(self) -> None:
-        if self._gripper_state_open:
-            self._set_gripper_position(self.GRIPPER_CLOSE)
-        self._gripper_state_open = False
-
-    def open_gripper(self) -> None:
-        if not self._gripper_state_open:
-            self._set_gripper_position(self.GRIPPER_OPEN)
-        self._gripper_state_open = True
-
-    def __del__(self) -> None:
-        self.robot.disconnect()
-
-    def clear_error_states(self):
-        self.robot.clean_error()
-        self.robot.motion_enable(True)
-        self.robot.set_mode(0)
-        self.robot.set_state(state=0)
-        self.robot.set_gripper_enable(True)
-        self.robot.set_gripper_speed(10000)
-
-    def get_robot_state(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
-
-        gripper_pos = self.get_gripper_pos()
-
-        code, servo_angle = self.robot.get_servo_angle(is_radian=True)
-        while code != 0:
-            print(f"Error code {code} in get_servo_angle().")
-            self.clear_error_states()
-            code, servo_angle = self.robot.get_servo_angle(is_radian=True)
-
-        code, cart_pos = self.robot.get_position(is_radian=True)
-        while code != 0:
-            print(f"Error code {code} in get_position().")
-            self.clear_error_states()
-            code, cart_pos = self.robot.get_position(is_radian=True)
-
-        cart_pos = np.array(cart_pos)
-        cart_pos[:3] /= 1000
-        return (
-            np.array([gripper_pos], np.float32),
-            np.array(servo_angle, np.float32),
-            np.array(cart_pos, np.float32),
-        )
-
-    def set_position(
-        self,
-        x: float,
-        y: float,
-        z: Optional[float] = None,
-        wait: bool = True,
-        acc: Optional[float] = None,
-    ) -> None:
-        self.robot.set_position(
-            x=1000 * x,
-            y=1000 * y,
-            z=None if z is None else 1000 * z,
-            roll=-180,
-            pitch=0,
-            yaw=0,
-            wait=wait,
-            speed=self.VEL,
-        )
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
-
-    def set_z(self, z: float, wait: bool = True) -> None:
-        self.robot.set_position(z=1000 * z, wait=wait, speed=self.VEL_Z)
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
+        p = self.env._observation_manager.ee_position
+        p[-1] = z
+        self.env._step_impl(actions=p)
 
 
 class Rate:
@@ -289,28 +98,15 @@ class EnvConfig:
     with_camera: bool = True
     debug_cam_vis: bool = False
     use_real: bool = True
-    robot_type: RobotType = RobotType.XARM
     enable_z: bool = True
-    task: Task = Task.PICKPLACE
 
 
 class BaseEnv:
     def __init__(self, cfg: EnvConfig):
-        if cfg.task == Task.SWEEP:
-            assert cfg.enable_z, "z control must be enabled for sweeping"
-
-        if cfg.task == Task.SWEEP:
-            raise NotImplementedError()  # TODO
 
         self.cfg = cfg
-        self._arm: Union[XArmSimpleRobotWrapper, UR5SimpleRobotWrapper]
         if cfg.use_real:
-            if self.cfg.robot_type == RobotType.XARM:
-                self._arm = XArmSimpleRobotWrapper()
-            elif self.cfg.robot_type == RobotType.UR5:
-                self._arm = UR5SimpleRobotWrapper()
-            else:
-                raise NotImplementedError(f"arm: {self.cfg.robot_type} not implemented")
+            self._arm = FrankaRobotSimWrapper()
         else:
             self._arm = None  # type: ignore
             if not self.cfg.debug_cam_vis:
@@ -358,13 +154,10 @@ class BaseEnv:
             depth_image = np.asanyarray(depth_frame.get_data())
             depth_image = cv2.convertScaleAbs(depth_image, alpha=0.03)
 
-            if self.cfg.robot_type == RobotType.UR5:
-                depth_image = depth_image[135:-100, 120:-170]
-                # depth_image = depth_image[120:-80, 150:-190]
-                color_image = color_image[20:-30, 40:-55]
-                farthest = 0.180
-            else:
-                farthest = 0.120
+            depth_image = depth_image[135:-100, 120:-170]
+            # depth_image = depth_image[120:-80, 150:-190]
+            color_image = color_image[20:-30, 40:-55]
+            farthest = 0.180
 
             if self.cfg.debug_cam_vis:
                 img_size = (480, 480)
@@ -395,9 +188,6 @@ class BaseEnv:
             "joint_positions": embodied.Space(
                 np.float32, (self.cfg.robot_type.joints(),)
             ),
-            "gripper_pos": embodied.Space(np.float32, (1,)),
-            "gripper_side": embodied.Space(np.float32, (3,)),
-            "grasped_side": embodied.Space(np.float32, (3,)),
             "reward": embodied.Space(np.float32),
             "is_first": embodied.Space(bool),
             "is_last": embodied.Space(bool),
@@ -426,21 +216,12 @@ class BaseEnv:
         color_image, depth_image = self.get_frames()
 
         # change observations to be within reasonable values
-        gripper_pos, servo_angle, cart_pos = self._arm.get_robot_state()
-        grasped_side_one_hot = {
-            Side.OTHER: [1, 0, 0],
-            Side.LEFT: [0, 1, 0],
-            Side.RIGHT: [0, 0, 1],
-        }
-        gripper_side = self.arm_side()
+        servo_angle, cart_pos = self._arm.get_robot_state()
         obs = dict(
             image=color_image,
             depth=depth_image,
             cartesian_position=cart_pos,
             joint_positions=servo_angle,
-            gripper_pos=gripper_pos,
-            gripper_side=np.array(grasped_side_one_hot[self.grasped_bin], np.float32),
-            grasped_side=np.array(grasped_side_one_hot[gripper_side], np.float32),
             is_last=False,
             is_terminal=False,
         )
@@ -469,67 +250,21 @@ class BaseEnv:
     def close(self) -> None:
         """Nothing to close."""
 
-
-def check_grasped_object_ur(gripper_pos: float) -> bool:
-    if 0.015 < gripper_pos and gripper_pos < 0.985:
-        return True
-    return False
-
-
 class Side(enum.Enum):
     LEFT = 1
     RIGHT = 2
     OTHER = 3
-
-
+    
 DEBUG_DELTA = 0.0
 # DEBUG_DELTA = 0.2
 
 
-class PickPlace(BaseEnv):  # GraspRewardEnv
+class Reach(BaseEnv):  # GraspRewardEnv
     COUNTDOWN_STEPS = 3
-
-    def random_xy_grid(self, side: Side) -> Tuple[float, float]:
-        if side == Side.LEFT:
-            x = np.random.uniform(
-                self._arm.LEFT_SAFE_XY_MIN[0], self._arm.LEFT_SAFE_XY_MAX[0]
-            )
-            y = np.random.uniform(
-                self._arm.LEFT_SAFE_XY_MIN[1], self._arm.LEFT_SAFE_XY_MAX[1]
-            )
-        elif side == Side.RIGHT:
-            x = np.random.uniform(
-                self._arm.RIGHT_SAFE_XY_MIN[0], self._arm.RIGHT_SAFE_XY_MAX[0]
-            )
-            y = np.random.uniform(
-                self._arm.RIGHT_SAFE_XY_MIN[1], self._arm.RIGHT_SAFE_XY_MAX[1]
-            )
-        else:
-            raise NotImplementedError(f"Got side: {side} ")
-
-        x = np.round(x / self.cfg.max_delta_m) * self.cfg.max_delta_m
-        y = np.round(y / self.cfg.max_delta_m) * self.cfg.max_delta_m
-
-        if side == Side.LEFT:
-            x = np.clip(x, self._arm.LEFT_SAFE_XY_MIN[0], self._arm.LEFT_SAFE_XY_MAX[0])
-            y = np.clip(y, self._arm.LEFT_SAFE_XY_MIN[1], self._arm.LEFT_SAFE_XY_MAX[1])
-        elif side == Side.RIGHT:
-            x = np.clip(
-                x, self._arm.RIGHT_SAFE_XY_MIN[0], self._arm.RIGHT_SAFE_XY_MAX[0]
-            )
-            y = np.clip(
-                y, self._arm.RIGHT_SAFE_XY_MIN[1], self._arm.RIGHT_SAFE_XY_MAX[1]
-            )
-        else:
-            raise NotImplementedError(f"Got side: {side} ")
-        return x, y
 
     def __init__(self, cfg: EnvConfig) -> None:
         super().__init__(cfg)
         if cfg.use_real:
-            self.grasped_object = False
-            self.grasped_bin = Side.OTHER
-            self._ball_side = Side.LEFT
             self._arm.set_z(self._arm.Z_RESET)
             x, y = self.random_xy_grid(self._ball_side)
             self._arm.set_position(x, y, self._arm.Z_RESET)
@@ -543,25 +278,6 @@ class PickPlace(BaseEnv):  # GraspRewardEnv
         traceback.print_stack()
         stacktrace = "".join(traceback.format_exception(*sys.exc_info()))
         print(stacktrace)
-
-    def arm_side(self, margin: float = -0.002) -> Side:
-        _, _, cart_pos = self._arm.get_robot_state()
-
-        pos = np.array(cart_pos)[:2]
-        if (np.array(self._arm.RIGHT_XY_MIN) + margin <= pos).all() and (
-            np.array(self._arm.RIGHT_XY_MAX) - margin >= pos
-        ).all():
-            return Side.RIGHT
-        elif (np.array(self._arm.LEFT_XY_MIN) + margin <= pos).all() and (
-            np.array(self._arm.LEFT_XY_MAX) - margin >= pos
-        ).all():
-            return Side.LEFT
-        else:
-            print("ARM NOT ON EITHER SIDE")
-            print(cart_pos[:2])
-            self._print_debug_info()
-            self._reset()
-            return self.arm_side()
 
     def current_bounds(self) -> Tuple[np.ndarray, np.ndarray, float]:
 
