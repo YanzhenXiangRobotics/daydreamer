@@ -1,5 +1,6 @@
 import argparse
-import os
+import os, sys
+sys.path.append("/home/xyz/PRL/Orbit")
 
 from omni.isaac.kit import SimulationApp
 
@@ -13,6 +14,8 @@ parser.add_argument("--cpu", action="store_true", default=False, help="Use CPU p
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 # parser.add_argument("--task", type=str, default=None, help="Name of the task.")
 parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
+parser.add_argument("--max_delta_m", type=float, default=0.04)
+parser.add_argument("--control_rate_hz", type=float, default=20)
 args_cli = parser.parse_args()
 
 config = {"headless": args_cli.headless}
@@ -39,7 +42,6 @@ import numpy as np
 import pyrealsense2 as rs
 
 import embodied
-from embodied.envs.spacemouse import SpaceMouse
 
 from omni.isaac.orbit_envs.utils import parse_env_cfg
 from omni.isaac.orbit_envs.manipulation.reach.reach_env import ReachEnv, ReachEnvCfg
@@ -47,14 +49,22 @@ import torch
 
 class FrankaRobotSimWrapper:
 
+    X_RESET_LOW = -0.1
+    X_RESET_HIGH = 0.1
+    Y_RESET_LOW = -0.1
+    Y_RESET_HIGH = 0.1
+    Z_RESET = 0.3 # Need to set to a value
+    Z_MOVING = 0.3
+    Z_TABLE = 0.18
+
     def __init__(self):
         env_cfg = parse_env_cfg(task_name="Isaac-Reach-Franka-v0", use_gpu=not args_cli.cpu, num_envs=args_cli.num_envs)
         self.env = ReachEnv(cfg=env_cfg)
 
     def get_robot_state(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
 
-        servo_angle = self.env._observation_manager.arm_dof_pos_normalized()
-        cart_pos = self.env._observation_manager.ee_position()
+        servo_angle = self.env._observation_manager.arm_dof_pos_normalized(self.env)
+        cart_pos = self.env._observation_manager.ee_position(self.env)
         return (
             np.array(servo_angle, np.float32),
             np.array(cart_pos, np.float32),
@@ -65,19 +75,17 @@ class FrankaRobotSimWrapper:
         x: float,
         y: float,
         z: Optional[float] = None,
-        wait: bool = True,
-        acc: Optional[float] = None,
     ) -> None:
         if z is None:
             z = self.env._observation_manager.ee_position()[-1]
         assert z is not None
 
-        self.env._step_impl(actions=torch.tensor((x, y, z, -2.2213, -2.2213, 0)))
+        self.env._step_impl(actions=torch.tensor((x, y, z, 0, 0, 0))) # desired rpy?
 
-    def set_z(self, z: float, wait: bool = True) -> None:
-        p = self.env._observation_manager.ee_position
+    def set_z(self, z: float) -> None:
+        p = self.env._observation_manager.ee_position(self.env)
         p[-1] = z
-        self.env._step_impl(actions=p)
+        self.env._step_impl(actions=torch.from_numpy(p))
 
 
 class Rate:
@@ -90,104 +98,19 @@ class Rate:
             time.sleep(0.001)
         self.last = time.time()
 
+class BaseTask:
+    def __init__(self):
 
-@dataclasses.dataclass
-class EnvConfig:
-    max_delta_m: float = 0.04  # max displacement for the arm per time step
-    control_rate_hz: float = 20
-    with_camera: bool = True
-    debug_cam_vis: bool = False
-    use_real: bool = True
-    enable_z: bool = True
-
-
-class BaseEnv:
-    def __init__(self, cfg: EnvConfig):
-
-        self.cfg = cfg
-        if cfg.use_real:
-            self._arm = FrankaRobotSimWrapper()
-        else:
-            self._arm = None  # type: ignore
-            if not self.cfg.debug_cam_vis:
-                return
-        self.rate = Rate(cfg.control_rate_hz)
-
-        if self.cfg.with_camera:
-            ctx = rs.context()
-            devices = ctx.query_devices()
-            for dev in devices:
-                dev.hardware_reset()
-            time.sleep(2)
-            self.pipeline = rs.pipeline()
-            config = rs.config()
-            config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-            config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
-            self.pipeline.start(config)
-            # if self.cfg.debug_cam_vis:
-            if self.cfg.debug_cam_vis:
-                while True:
-                    image = self.get_frames()[0][:, :, ::-1]
-                    depth = np.repeat(self.get_frames()[1], 3, -1)
-                    cv2.imshow("img", np.concatenate([image, depth], 1))
-
-                    # import matplotlib.pyplot as plt
-                    # fig, ax = plt.subplots()
-                    # ax.hist(depth.ravel(), bins=100)
-                    # plt.show()
-
-                    # image = cv2.applyColorMap(255 - depth, cv2.COLORMAP_VIRIDIS)
-                    # cv2.imshow("img", depth)
-
-                    cv2.waitKey(1)
-
-    def __len__(self):
-        # Return positive integer for batched envs.
-        return 0
-
-    def get_frames(self) -> Tuple[np.ndarray, np.ndarray]:
-        if self.cfg.with_camera:
-            frames = self.pipeline.wait_for_frames()
-            color_frame = frames.get_color_frame()
-            color_image = np.asanyarray(color_frame.get_data())
-            depth_frame = frames.get_depth_frame()
-            depth_image = np.asanyarray(depth_frame.get_data())
-            depth_image = cv2.convertScaleAbs(depth_image, alpha=0.03)
-
-            depth_image = depth_image[135:-100, 120:-170]
-            # depth_image = depth_image[120:-80, 150:-190]
-            color_image = color_image[20:-30, 40:-55]
-            farthest = 0.180
-
-            if self.cfg.debug_cam_vis:
-                img_size = (480, 480)
-            else:
-                img_size = (64, 64)
-            image = cv2.resize(color_image, img_size)[:, :, ::-1]
-            depth = cv2.resize(depth_image, img_size)[:, :, None]
-            # Map depth to used range for our robot setup.
-            depth = depth.astype(np.float32) / 255
-            nearest = 0.050
-            depth = (depth - nearest) / (farthest - nearest)
-            depth = (255 * np.clip(depth, 0, 1)).astype(np.uint8)
-
-        else:
-            image = np.zeros((64, 64, 3))
-            depth = np.zeros((64, 64, 1))
-        return image, depth
-
-    def __del__(self) -> None:
-        del self._arm
+        self._arm = FrankaRobotSimWrapper()
+        self.rate = Rate(args_cli.control_rate_hz)
 
     @property
     def obs_space(self) -> Dict[str, embodied.Space]:
         return {
-            "image": embodied.Space(np.uint8, (64, 64, 3)),
+            "image": embodied.Space(np.uint8, (64, 64, 3)), # TODO: add
             "depth": embodied.Space(np.uint8, (64, 64, 1)),
             "cartesian_position": embodied.Space(np.float32, (6,)),
-            "joint_positions": embodied.Space(
-                np.float32, (self.cfg.robot_type.joints(),)
-            ),
+            "joint_positions": embodied.Space(np.float32, (7,)),
             "reward": embodied.Space(np.float32),
             "is_first": embodied.Space(bool),
             "is_last": embodied.Space(bool),
@@ -209,11 +132,10 @@ class BaseEnv:
 
     def get_obs(
         self,
-        robot_in_safe_state: bool,
         is_first: bool = False,
         reward: Optional[float] = None,
     ) -> Dict[str, Any]:
-        color_image, depth_image = self.get_frames()
+        color_image, depth_image = np.zeros((64, 64, 3)), np.zeros((64, 64, 3)) #TODO: add visual
 
         # change observations to be within reasonable values
         servo_angle, cart_pos = self._arm.get_robot_state()
@@ -227,10 +149,7 @@ class BaseEnv:
         )
 
         if reward is None:
-            if robot_in_safe_state:
-                obs["reward"] = float(self.get_reward(obs))
-            else:
-                obs["reward"] = float(0)
+            obs["reward"] = float(self.get_reward(obs))
         else:
             obs["reward"] = reward
 
@@ -250,82 +169,20 @@ class BaseEnv:
     def close(self) -> None:
         """Nothing to close."""
 
-class Side(enum.Enum):
-    LEFT = 1
-    RIGHT = 2
-    OTHER = 3
-    
-DEBUG_DELTA = 0.0
-# DEBUG_DELTA = 0.2
-
-
-class Reach(BaseEnv):  # GraspRewardEnv
+class ReachTask(BaseTask):  # GraspRewardEnv
     COUNTDOWN_STEPS = 3
 
-    def __init__(self, cfg: EnvConfig) -> None:
-        super().__init__(cfg)
-        if cfg.use_real:
-            self._arm.set_z(self._arm.Z_RESET)
-            x, y = self.random_xy_grid(self._ball_side)
-            self._arm.set_position(x, y, self._arm.Z_RESET)
-            self._reset()
-
-    def _print_debug_info(self) -> None:
-        print(f"Right Bound Min: {self._arm.RIGHT_XY_MIN}")
-        print(f"Right Bound Max: {self._arm.RIGHT_XY_MAX}")
-        print(f"Left  Bound Min: {self._arm.LEFT_XY_MIN}")
-        print(f"Left  Bound Max: {self._arm.LEFT_XY_MAX}")
-        traceback.print_stack()
-        stacktrace = "".join(traceback.format_exception(*sys.exc_info()))
-        print(stacktrace)
-
-    def current_bounds(self) -> Tuple[np.ndarray, np.ndarray, float]:
-
-        side = self.arm_side()
-        if side == Side.LEFT:
-            if self.is_hover():
-                return (
-                    np.array(self._arm.LEFT_SAFE_XY_MIN),
-                    np.array(self._arm.LEFT_SAFE_XY_MAX),
-                    self._arm.Z_HOVER,
-                )
-            else:
-                return (
-                    np.array(self._arm.LEFT_XY_MIN),
-                    np.array(self._arm.LEFT_XY_MAX),
-                    self._arm.Z_TABLE,
-                )
-        elif side == Side.RIGHT:
-            if self.is_hover():
-                return (
-                    np.array(self._arm.RIGHT_SAFE_XY_MIN),
-                    
-                    np.array(self._arm.RIGHT_SAFE_XY_MAX),
-                    self._arm.Z_HOVER,
-                )
-            else:
-                return (
-                    np.array(self._arm.RIGHT_XY_MIN),
-                    np.array(self._arm.RIGHT_XY_MAX),
-                    self._arm.Z_TABLE,
-                )
-        else:
-            raise NotImplementedError
+    def __init__(self) -> None:
+        super().__init__()
+        self._arm.set_z(self._arm.Z_RESET)
+        x, y = np.random.uniform(self._arm.X_RESET_LOW, self._arm.X_RESET_HIGH), \
+                np.random.uniform(self._arm.Y_RESET_LOW, self._arm.Y_RESET_HIGH)
+        self._arm.set_position(x, y, self._arm.Z_RESET)
 
     @property
     def act_space(self) -> Dict[str, embodied.Space]:
-        if self.cfg.enable_z:
-            return {
-                "action": embodied.Space(np.int64, (), 0, 6),
-            }
-        else:
-            return {
-                "action": embodied.Space(np.int64, (), 0, 5),
-            }
+        return {"action": embodied.Space(np.int64, (), 0, 4)}
 
-    def is_hover(self) -> bool:
-        _, _, cart_pos = self._arm.get_robot_state()
-        return cart_pos[2] > (self._arm.Z_HOVER + self._arm.Z_TABLE) / 2
 
     def compute_arm_position(self, control_action: np.ndarray) -> np.ndarray:
         """Convert control action to TCP homogeneous transform.
@@ -346,38 +203,13 @@ class Reach(BaseEnv):  # GraspRewardEnv
         target_pose = np.array(cart_pos)
         target_pose[:2] = target_pose[:2] + control_action
 
-        xy_min, xy_max, z_loc = self.current_bounds()
-
         target_pose[:2] = (
             np.round(target_pose[:2] / self.cfg.max_delta_m)
         ) * self.cfg.max_delta_m
-
-        desired_pose = np.copy(target_pose)
+        xy_min, xy_max = -0.5, 0.5 # Need to further investigate
         target_pose[:2] = np.clip(target_pose[:2], xy_min, xy_max)
 
-        if self.grasped_object and self.is_hover():
-            side = self.arm_side()
-            # cross the middle if holding object
-            if (
-                side == Side.LEFT
-                and desired_pose[self._arm.AXIS] + 0.01 < target_pose[self._arm.AXIS]
-            ):
-                target_pose[:2] = np.clip(
-                    target_pose[:2],
-                    self._arm.RIGHT_SAFE_XY_MIN,
-                    self._arm.RIGHT_SAFE_XY_MAX,
-                )
-            if (
-                side == Side.RIGHT
-                and desired_pose[self._arm.AXIS] - 0.01 > target_pose[self._arm.AXIS]
-            ):
-                target_pose[:2] = np.clip(
-                    target_pose[:2],
-                    self._arm.LEFT_SAFE_XY_MIN,
-                    self._arm.LEFT_SAFE_XY_MAX,
-                )
-
-        target_pose[2] = z_loc
+        target_pose[2] = self._arm.Z_MOVING
         if control_action[0] == 0:
             target_pose[0] = cart_pos[0]
         if control_action[1] == 0:
@@ -387,248 +219,45 @@ class Reach(BaseEnv):  # GraspRewardEnv
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
         if action["reset"]:
             if action.get("manual_resume", False):
-                return self.get_obs(robot_in_safe_state=True, is_first=True)
+                return self.get_obs(is_first=True)
             else:
                 return self._reset()
 
-
-        if action["action"] < 4:
+        if action["action"] < 4: # move in x, y positions
             pos_delta = ((-1, 0), (1, 0), (0, -1), (0, 1))[action["action"]]
-            xyzrpy = self.compute_arm_position(np.array(pos_delta))
-            self._arm.set_position(xyzrpy[0], xyzrpy[1])
+            xy = self.compute_arm_position(np.array(pos_delta))
+            self._arm.set_position(xy[0], xy[1])
 
-        elif action["action"] == 4:  # close
-            if self._arm._gripper_state_open:
-                self._arm.close_gripper()
-            else:
-                self._arm.open_gripper()
-
-        elif action["action"] == 5:  # close
-            arm_side: Side = self.arm_side()
-            _, _, cart_pos = self._arm.get_robot_state()
-            is_hover = cart_pos[2] > (self._arm.Z_HOVER + self._arm.Z_TABLE) / 2
-            if is_hover:
-                self._arm.set_z(self._arm.Z_TABLE)
-            elif self.grasped_object:
-                _, _, cart_pos = self._arm.get_robot_state()
-                if arm_side == Side.LEFT:
-                    cart_pos[:2] = np.clip(
-                        cart_pos[:2],
-                        self._arm.LEFT_SAFE_XY_MIN,
-                        self._arm.LEFT_SAFE_XY_MAX,
-                    )
-                else:
-                    cart_pos[:2] = np.clip(
-                        cart_pos[:2],
-                        self._arm.RIGHT_SAFE_XY_MIN,
-                        self._arm.RIGHT_SAFE_XY_MAX,
-                    )
-                if self.cfg.enable_z:
-                    self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_TABLE)
-                    self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_HOVER)
-            else:
-                # no object so no op
-                pass
-        else:
-            raise NotImplementedError(action)
+        elif action["action"] == 4: # try to reach
+            self._arm.set_z(self._arm.Z_TABLE)
 
         self.rate.sleep()
 
-        obs = self.get_obs(
-            robot_in_safe_state=True, is_first=False
-        )  # TODO: check safe state
+        obs = self.get_obs(is_first=False)
         if obs["reward"] != 0:
-            obs = self.get_obs(
-                robot_in_safe_state=True, is_first=False, reward=obs["reward"]
+            obs = self.get_obs(is_first=False, reward=obs["reward"]
             )
 
-        if action.get("manual_pause", False):
-            self._arm.open_gripper()
         return obs
 
     def _reset(self) -> Dict[str, Any]:
-        if self.grasped_object:
-            # move to random pos in bin where object was grasped
-            x, y = self.random_xy_grid(self._ball_side)
-            self._arm.set_position(x, y, self._arm.Z_HOVER)
-
-        self._arm.open_gripper()
-        self.grasped_bin = Side.OTHER
-        self.grasped_object = False
-
-        if self._ball_side == Side.LEFT:
-            xyz_min, xyz_max = self._arm.LEFT_XY_MIN, self._arm.LEFT_XY_MAX
-        elif self._ball_side == Side.RIGHT:
-            xyz_min, xyz_max = self._arm.RIGHT_XY_MIN, self._arm.RIGHT_XY_MAX
-        else:
-            raise NotImplementedError(f"ball side={self._ball_side}")
-
-        if self.cfg.robot_type == RobotType.UR5:
-            # get ball out of corners
-            for corner_x, corner_y in ([1, 0], [0, 0], [0, 1], [1, 1]):
-                if corner_x == 0:
-                    x = xyz_min[0]
-                else:
-                    x = xyz_max[0]
-                if corner_y == 0:
-                    y = xyz_min[1]
-                else:
-                    y = xyz_max[1]
-                time.sleep(2)
-                self._arm.set_position(x, y, self._arm.Z_TABLE, acc=0.6)
-
-        self._arm.open_gripper()
-        x, y = self.random_xy_grid(self._ball_side)
-        self._arm.set_position(x, y, self._arm.Z_TABLE, acc=0.6)
-        time.sleep(1)  # wait for scene to settle after reset
-
-        obs = self.get_obs(robot_in_safe_state=True, is_first=True)
+        obs = self.get_obs(is_first=True)
         return obs
 
     def get_reward(self, curr_obs: Dict[str, Any]) -> float:
-        grasped_old = self.grasped_object
-        grasped_new = check_grasped_object_ur(curr_obs["gripper_pos"])
-        self.grasped_object = grasped_new
-
-        arm_side: Side = self.arm_side()
-        if grasped_old and grasped_new and arm_side != self.grasped_bin:
-            # let go of ball
-            self._arm.open_gripper()
-            self._ball_side = arm_side
-            self.grasped_object = False
-
-            # move arm down
-            self._arm.set_z(self._arm.Z_TABLE)
-
-            # move arm to random location on success
-            x, y = self.random_xy_grid(self._ball_side)
-            self._arm.set_position(x, y, self._arm.Z_TABLE)
+        if curr_obs["gripper_pos"] >= 0.4 and curr_obs["gripper_pos"] <= 0.6:
             return 10
-
-        if not grasped_old and not grasped_new:  # not holding it
+        else:
             return 0
 
-        if not grasped_old and grasped_new:  # grasped it
-            self.grasped_bin = arm_side
-            assert self.grasped_bin != Side.OTHER
-            _, _, cart_pos = self._arm.get_robot_state()
-            if arm_side == Side.LEFT:
-                cart_pos[:2] = np.clip(
-                    cart_pos[:2], self._arm.LEFT_SAFE_XY_MIN, self._arm.LEFT_SAFE_XY_MAX
-                )
-            else:
-                cart_pos[:2] = np.clip(
-                    cart_pos[:2],
-                    self._arm.RIGHT_SAFE_XY_MIN,
-                    self._arm.RIGHT_SAFE_XY_MAX,
-                )
-            if not self.cfg.enable_z:
-                self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_TABLE)
-                self._arm.set_position(cart_pos[0], cart_pos[1], self._arm.Z_HOVER)
-            return 1
+# def main(env_config: EnvConfig) -> None:
+#     pass
 
-        if grasped_old and not grasped_new:  # dropped it
-            assert arm_side == self.grasped_bin
-            rew = -1
-            self._arm.set_z(self._arm.Z_TABLE)
-            self.grasped_bin = Side.OTHER
-            return rew
-
-        if grasped_old and grasped_new:  # holding it
-            return 0
-
-        raise NotImplementedError
-
-
-class SpaceMouseAgent:
-    def __init__(self, env_config: EnvConfig) -> None:
-        self._cfg = env_config
-        self._mouse = SpaceMouse()
-
-    def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
-        while True:
-            input_position = np.zeros((2,))
-            if np.linalg.norm(self._mouse.input_pos) > 10:
-                # print(self._mouse.input_pos)
-                input_position = (
-                    np.asarray(
-                        [
-                            self._mouse.input_pos[1],
-                            self._mouse.input_pos[0],
-                            -self._mouse.input_pos[2],
-                        ]
-                    )
-                    / 350
-                )
-                input_position = input_position[:2]
-
-            if np.abs(input_position[0]) > np.abs(input_position[1]):
-                if input_position[0] > 0.2:
-                    return {"action": 0}
-                elif input_position[0] < -0.2:
-                    return {"action": 1}
-            else:
-                if input_position[1] > 0.2:
-                    return {"action": 2}
-                elif input_position[1] < -0.2:
-                    return {"action": 3}
-
-            if self._mouse.input_button1:
-                return {"action": 4}
-            if self._mouse.input_button0 and self._cfg.enable_z:
-                return {"action": 5}
-
-            time.sleep(0.005)  # wait for an action
-
-
-class UnsafeTestAgent:
-    def __init__(self, env_config: EnvConfig) -> None:
-        self._cfg = env_config
-
-    def act(self, obs: Dict[str, Any]) -> Dict[str, Any]:
-        del obs  # not used
-
-        # randomize direction of action
-        control_action = np.random.randint(0, 6)
-        return {"action": control_action, "reset": False}
-
-import gymnasium as gym 
-import panda_gym
-
-def main(env_config: EnvConfig) -> None:
-    print(env_config)
-    # select an env
-    # env = KeyRewardEnv(env_config)
-    # env = CornerRewardEnv(env_config)
-    env = gym.make('PandaReach-v3', render_mode="human")
-
-    # select an agent
-    # agent = UnsafeTestAgent(env_config)
-    agent = SpaceMouseAgent(env_config)
-    print(f"==> Running the environment with {agent}")
-
-    obs, _ = env.reset()
-    count = 0
-    while True:
-        count += 1
-        if count % 100 == 0:
-            env.reset()
-        try:
-            action = agent.act(obs)  # type: ignore
-        except IndexError:
-            break
-        t = time.time()
-        action["reset"] = False
-        start = time.time()
-        obs, reward, terminated, truncated = env.step(action)
-        print(f"action={action}, {time.time() - start}")
-        # reward = obs["reward"]
-        if np.abs(reward) > 0.5:
-            print(f"Step time : {time.time() - t}, reward: {reward}")
-        if obs["is_last"]:
-            env.step({"reset": True})
-    print("==> Finishing to run the environment")
-
+def main():
+    env = ReachTask()
+    obs = env.get_obs(is_first=True)
+    print(obs)
 
 if __name__ == "__main__":
-    main(dcargs.parse(EnvConfig))
+    # main(dcargs.parse(EnvConfig))
+    main()
