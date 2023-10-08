@@ -1,7 +1,7 @@
 import embodied
 import numpy as np
 
-from . import gym
+from . import embodied_gym
 
 
 class A1(embodied.Env):
@@ -12,7 +12,7 @@ class A1(embodied.Env):
     self._gymenv = env_builder.build_env(
         enable_rendering=False,
         num_action_repeat=repeat, use_real_robot=bool(task == 'real'))
-    self._env = gym.Gym(
+    self._env = embodied_gym.Gym(
         self._gymenv, obs_key='vector', act_key='action', checks=True)
 
   @property

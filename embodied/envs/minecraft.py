@@ -4,7 +4,7 @@ import threading
 import embodied
 import numpy as np
 
-from . import gym
+from . import embodied_gym
 
 
 class Minecraft(embodied.Env):
@@ -28,7 +28,7 @@ class Minecraft(embodied.Env):
     if logs:
       logging.basicConfig(level=logging.DEBUG)
     with self._LOCK:
-      import gym as openai_gym
+      import embodied.envs.embodied_gym as openai_gym
       from .import minerl_internal
       ids = [x.id for x in openai_gym.envs.registry.all()]
       minerl_internal.SIZE = size
@@ -43,7 +43,7 @@ class Minecraft(embodied.Env):
       if 'MinecraftAxe-v1' not in ids:
         minerl_internal.Axe().register()
       self._inner = openai_gym.make(f'Minecraft{task.title()}-v1')
-    self._env = gym.Gym(self._inner, checks=False)
+    self._env = embodied_gym.Gym(self._inner, checks=False)
     self._env = embodied.wrappers.TimeLimit(self._env, length)
 
     # Observations.

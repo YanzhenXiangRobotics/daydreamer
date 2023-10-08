@@ -7,7 +7,7 @@ from .crafter import Crafter
 from .dmc import DMC
 from .dmlab import DMLab
 from .dummy import Dummy
-from .gym import Gym
+from .embodied_gym import Gym
 from .hrlgrid import HRLGrid
 from .loconav import LocoNav
 from .minecraft import Minecraft

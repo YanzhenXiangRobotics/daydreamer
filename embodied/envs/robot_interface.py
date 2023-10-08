@@ -182,16 +182,18 @@ class XArmSimpleRobotWrapper:
 
         # self.robot = XArmAPI("192.168.1.233")
         self.robot = XArmAPI(do_not_open=True)
-        # self.robot = XArmAPI("127.0.0.1")
+        # self.robot = XArmAPI("localhost")
         self._set_gripper_position(self.GRIPPER_OPEN)
         self._gripper_state_open = True  # open
 
     def get_gripper_pos(self) -> float:
-        code, gripper_pos = self.robot.get_gripper_position()
+        # code, gripper_pos = self.robot.get_gripper_position()
+        code, gripper_pos = 0, 0.6
         while code != 0 or gripper_pos is None:
             print(f"Error code {code} in get_gripper_position(). {gripper_pos}")
             self.clear_error_states()
-            code, gripper_pos = self.robot.get_gripper_position()
+            # code, gripper_pos = self.robot.get_gripper_position()
+            code, gripper_pos = np.copy(code), np.copy(gripper_pos)
 
         normalized_gripper_pos = (gripper_pos - self.GRIPPER_OPEN) / (
             self.GRIPPER_CLOSE - self.GRIPPER_OPEN
@@ -199,9 +201,10 @@ class XArmSimpleRobotWrapper:
         return normalized_gripper_pos
 
     def _set_gripper_position(self, pos: int) -> None:
-        self.robot.set_gripper_position(pos, wait=True)
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
+        # self.robot.set_gripper_position(pos, wait=True)
+        # while self.robot.get_is_moving():
+        #     time.sleep(0.01)
+        pass
 
     def close_gripper(self) -> None:
         if self._gripper_state_open:
@@ -214,33 +217,40 @@ class XArmSimpleRobotWrapper:
         self._gripper_state_open = True
 
     def __del__(self) -> None:
-        self.robot.disconnect()
+        # self.robot.disconnect()
+        pass
 
     def clear_error_states(self):
-        self.robot.clean_error()
-        self.robot.motion_enable(True)
-        self.robot.set_mode(0)
-        self.robot.set_state(state=0)
-        self.robot.set_gripper_enable(True)
-        self.robot.set_gripper_speed(10000)
+        # self.robot.clean_error()
+        # self.robot.motion_enable(True)
+        # self.robot.set_mode(0)
+        # self.robot.set_state(state=0)
+        # self.robot.set_gripper_enable(True)
+        # self.robot.set_gripper_speed(10000)
+        pass
 
     def get_robot_state(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
+        # while self.robot.get_is_moving():
+        #     time.sleep(0.01)
+        pass
 
         gripper_pos = self.get_gripper_pos()
 
-        code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+        # code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+        code, servo_angle = 0, [np.pi/2, 0, -np.pi/3, 0, 0]
         while code != 0:
             print(f"Error code {code} in get_servo_angle().")
             self.clear_error_states()
-            code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+            # code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+            code, servo_angle = 0, np.copy(servo_angle)
 
-        code, cart_pos = self.robot.get_position(is_radian=True)
+        # code, cart_pos = self.robot.get_position(is_radian=True)
+        code, cart_pos = 0, [300, -100, 0.1, 0, 0, 0]
         while code != 0:
             print(f"Error code {code} in get_position().")
             self.clear_error_states()
-            code, cart_pos = self.robot.get_position(is_radian=True)
+            # code, cart_pos = self.robot.get_position(is_radian=True)
+            code, cart_pos = 0, np.copy(cart_pos)
 
         cart_pos = np.array(cart_pos)
         cart_pos[:3] /= 1000
@@ -258,23 +268,25 @@ class XArmSimpleRobotWrapper:
         wait: bool = True,
         acc: Optional[float] = None,
     ) -> None:
-        self.robot.set_position(
-            x=1000 * x,
-            y=1000 * y,
-            z=None if z is None else 1000 * z,
-            roll=-180,
-            pitch=0,
-            yaw=0,
-            wait=wait,
-            speed=self.VEL,
-        )
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
+        # self.robot.set_position(
+        #     x=1000 * x,
+        #     y=1000 * y,
+        #     z=None if z is None else 1000 * z,
+        #     roll=-180,
+        #     pitch=0,
+        #     yaw=0,
+        #     wait=wait,
+        #     speed=self.VEL,
+        # )
+        # while self.robot.get_is_moving():
+        #     time.sleep(0.01)
+        pass
 
     def set_z(self, z: float, wait: bool = True) -> None:
-        self.robot.set_position(z=1000 * z, wait=wait, speed=self.VEL_Z)
-        while self.robot.get_is_moving():
-            time.sleep(0.01)
+        # self.robot.set_position(z=1000 * z, wait=wait, speed=self.VEL_Z)
+        # while self.robot.get_is_moving():
+        #     time.sleep(0.01)
+        pass
 
 
 class Rate:
@@ -292,7 +304,8 @@ class Rate:
 class EnvConfig:
     max_delta_m: float = 0.04  # max displacement for the arm per time step
     control_rate_hz: float = 20
-    with_camera: bool = True
+    # with_camera: bool = True
+    with_camera: bool = False
     debug_cam_vis: bool = False
     use_real: bool = True
     robot_type: RobotType = RobotType.XARM

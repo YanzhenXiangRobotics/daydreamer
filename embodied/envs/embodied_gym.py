@@ -1,21 +1,21 @@
 import embodied
-import gym
+import embodied.envs.embodied_gym as embodied_gym
 import numpy as np
 
 
 class Gym(embodied.Env):
 
   def __init__(self, env, obs_key='image', act_key='action', checks=False):
-    self._env = gym.make(env) if isinstance(env, str) else env
+    self._env = embodied_gym.make(env) if isinstance(env, str) else env
     self._obs_dict = getattr(self._env.observation_space, 'spaces', None)
     self._act_dict = getattr(self._env.action_space, 'spaces', None)
     self._scalar_obs = [
         k for k, v in self._obs_dict.items()
-        if isinstance(v, gym.spaces.Box) and v.shape == ()
+        if isinstance(v, embodied_gym.spaces.Box) and v.shape == ()
     ] if self._obs_dict else []
     self._scalar_act = [
         k for k, v in self._act_dict.items()
-        if isinstance(v, gym.spaces.Box) and v.shape == ()
+        if isinstance(v, embodied_gym.spaces.Box) and v.shape == ()
     ] if self._act_dict else []
     self._obs_key = obs_key
     self._act_key = act_key
@@ -104,7 +104,7 @@ class Gym(embodied.Env):
     result = {}
     for key, value in nest.items():
       key = prefix + '/' + key if prefix else key
-      if isinstance(value, gym.spaces.Dict):
+      if isinstance(value, embodied_gym.spaces.Dict):
         value = value.spaces
       if isinstance(value, dict):
         result.update(self._flatten(value, key))

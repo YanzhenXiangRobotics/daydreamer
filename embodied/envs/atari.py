@@ -1,6 +1,6 @@
 import embodied
 import numpy as np
-
+from . import embodied_gym
 
 class Atari(embodied.Env):
 
@@ -39,7 +39,7 @@ class Atari(embodied.Env):
     self._length = length
     self._random = np.random.RandomState(seed)
     with self.LOCK:
-      self._env = gym.envs.atari.AtariEnv(
+      self._env = embodied_gym.envs.atari.AtariEnv(
           game=name,
           obs_type='image',  # TODO: Internal old version.
           # obs_type='grayscale' if gray else 'rgb',

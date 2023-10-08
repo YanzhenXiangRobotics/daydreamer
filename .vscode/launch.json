@@ -5,10 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File",
+            // "name": "Python: Current File",
+            "name": "Python",
             "type": "python",
             "request": "launch",
-            "program": "${file}",
+            // "program": "${file}",
+            "program": "embodied/agents/dreamerv2plus/train.py",
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": ["--configs",
@@ -17,7 +19,7 @@
                     "acting",
                     // "learning",
                     "--task",
-                    "xarm_dummy",
+                    "xarm_real",
                     "--tf.platform",
                     "cpu",
                     "--logdir",
